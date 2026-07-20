@@ -39,6 +39,17 @@ function rawOf(flight) {
   return flight?.latest_position_raw || {};
 }
 
+function distanceKm(from, to) {
+  const earthRadiusKm = 6371;
+  const toRadians = (value) => value * Math.PI / 180;
+  const dLat = toRadians(to[1] - from[1]);
+  const dLon = toRadians(to[0] - from[0]);
+  const lat1 = toRadians(from[1]);
+  const lat2 = toRadians(to[1]);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function createPlaneElement() {
   const element = document.createElement("button");
   element.className = "plane-marker";
@@ -73,18 +84,52 @@ function animateMarker(marker, nextLngLat) {
 }
 
 function trailFeature(flight) {
-  const coordinates = (flight.positions || [])
-    .map((position) => [toNumber(position.lon), toNumber(position.lat)])
-    .filter(([lon, lat]) => lon != null && lat != null);
+  const points = (flight.positions || [])
+    .map((position) => ({
+      coordinate: [toNumber(position.lon), toNumber(position.lat)],
+      capturedAt: position.captured_at ? new Date(position.captured_at).getTime() : null
+    }))
+    .filter((point) => point.coordinate[0] != null && point.coordinate[1] != null);
 
-  if (coordinates.length < 2) {
+  if (points.length < 2) {
+    return null;
+  }
+
+  const segments = [];
+  let segment = [points[0].coordinate];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const minutes = previous.capturedAt && current.capturedAt
+      ? Math.max(0.01, (current.capturedAt - previous.capturedAt) / 60000)
+      : null;
+    const jumpKm = distanceKm(previous.coordinate, current.coordinate);
+    const impliedKnots = minutes ? (jumpKm / 1.852) / (minutes / 60) : 0;
+    const shouldSplit = jumpKm > 1200 || (minutes && minutes > 30) || (minutes && impliedKnots > 1200);
+
+    if (shouldSplit) {
+      if (segment.length > 1) {
+        segments.push(segment);
+      }
+      segment = [current.coordinate];
+    } else {
+      segment.push(current.coordinate);
+    }
+  }
+
+  if (segment.length > 1) {
+    segments.push(segment);
+  }
+
+  if (!segments.length) {
     return null;
   }
 
   return {
     type: "Feature",
     properties: { id: flight.id, selected: false },
-    geometry: { type: "LineString", coordinates }
+    geometry: { type: "MultiLineString", coordinates: segments }
   };
 }
 
@@ -92,6 +137,8 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
   const container = useRef(null);
   const map = useRef(null);
   const markers = useRef(new Map());
+  const liveFrame = useRef(null);
+  const liveFlights = useRef([]);
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -100,9 +147,12 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
       style,
       center: [4.7639, 52.3086],
       zoom: 4,
-      pitch: 28
+      pitch: 0,
+      bearing: 0
     });
-    map.current.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.current.dragRotate.disable();
+    map.current.touchZoomRotate.disableRotation();
+    map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.current.on("load", () => {
       map.current.addSource("flight-trails", {
         type: "geojson",
@@ -133,6 +183,7 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
 
   useEffect(() => {
     if (!map.current) return;
+    liveFlights.current = flights;
 
     const trailSource = map.current.getSource("flight-trails");
     if (trailSource) {
@@ -178,11 +229,53 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
       map.current.easeTo({
         center: [selectedLon, selectedLat],
         zoom: Math.max(map.current.getZoom(), 6.3),
-        bearing: Number(selectedFlight.last_heading || 0) - 18,
+        bearing: 0,
+        pitch: 0,
         duration: 900
       });
     }
   }, [flights, selectedFlight, onSelect]);
+
+  useEffect(() => {
+    function projectedLngLat(flight) {
+      const lat = toNumber(flight.last_lat);
+      const lon = toNumber(flight.last_lon);
+      const speedKts = toNumber(flight.last_ground_speed_kts);
+      const heading = toNumber(flight.last_heading);
+      const seenAt = flight.last_seen_at ? new Date(flight.last_seen_at).getTime() : Date.now();
+
+      if (lat == null || lon == null || speedKts == null || heading == null) {
+        return lat == null || lon == null ? null : [lon, lat];
+      }
+
+      const elapsedSeconds = Math.min(25, Math.max(0, (Date.now() - seenAt) / 1000));
+      const distanceKm = speedKts * 1.852 * elapsedSeconds / 3600;
+      const headingRad = heading * Math.PI / 180;
+      const latRad = lat * Math.PI / 180;
+      const earthRadiusKm = 6371;
+      const projectedLat = lat + (distanceKm * Math.cos(headingRad) / earthRadiusKm) * 180 / Math.PI;
+      const projectedLon = lon + (distanceKm * Math.sin(headingRad) / (earthRadiusKm * Math.cos(latRad))) * 180 / Math.PI;
+      return [projectedLon, projectedLat];
+    }
+
+    function tick() {
+      for (const flight of liveFlights.current) {
+        const marker = markers.current.get(flight.id);
+        const next = marker ? projectedLngLat(flight) : null;
+        if (marker && next) {
+          marker.setLngLat(next);
+        }
+      }
+      liveFrame.current = requestAnimationFrame(tick);
+    }
+
+    liveFrame.current = requestAnimationFrame(tick);
+    return () => {
+      if (liveFrame.current) {
+        cancelAnimationFrame(liveFrame.current);
+      }
+    };
+  }, []);
 
   const raw = rawOf(selectedFlight);
 

@@ -174,10 +174,10 @@ export async function getFlightsForUser(userId) {
   `).all(userId).map(normalizeRow);
 
   const positionsStatement = db.prepare(`
-    select captured_at, lat, lon, altitude_ft, ground_speed_kts, heading, source, raw
+    select id, captured_at, lat, lon, altitude_ft, ground_speed_kts, heading, source, raw
     from flight_positions
     where tracked_flight_id = ?
-    order by captured_at desc
+    order by captured_at desc, id desc
     limit 80
   `);
 
