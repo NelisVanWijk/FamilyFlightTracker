@@ -93,6 +93,27 @@ function animateMarker(marker, nextLngLat) {
   requestAnimationFrame(frame);
 }
 
+function projectedLngLat(flight) {
+  const lat = toNumber(flight.last_lat);
+  const lon = toNumber(flight.last_lon);
+  const speedKts = toNumber(flight.last_ground_speed_kts);
+  const heading = toNumber(flight.last_heading);
+  const seenAt = flight.last_seen_at ? new Date(flight.last_seen_at).getTime() : Date.now();
+
+  if (lat == null || lon == null || speedKts == null || heading == null) {
+    return lat == null || lon == null ? null : [lon, lat];
+  }
+
+  const elapsedSeconds = Math.min(25, Math.max(0, (Date.now() - seenAt) / 1000));
+  const distanceKm = speedKts * 1.852 * elapsedSeconds / 3600;
+  const headingRad = heading * Math.PI / 180;
+  const latRad = lat * Math.PI / 180;
+  const earthRadiusKm = 6371;
+  const projectedLat = lat + (distanceKm * Math.cos(headingRad) / earthRadiusKm) * 180 / Math.PI;
+  const projectedLon = lon + (distanceKm * Math.sin(headingRad) / (earthRadiusKm * Math.cos(latRad))) * 180 / Math.PI;
+  return [projectedLon, projectedLat];
+}
+
 function trailFeature(flight) {
   const points = (flight.positions || [])
     .map((position) => ({
@@ -317,7 +338,7 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
         marker = new maplibregl.Marker({ element, anchor: "center" }).setLngLat([lon, lat]).addTo(map.current);
         markers.current.set(flight.id, marker);
       } else {
-        animateMarker(marker, [lon, lat]);
+        animateMarker(marker, projectedLngLat(flight) || [lon, lat]);
       }
 
       const element = marker.getElement();
@@ -348,27 +369,6 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
   }, [flights, selectedFlight, onSelect]);
 
   useEffect(() => {
-    function projectedLngLat(flight) {
-      const lat = toNumber(flight.last_lat);
-      const lon = toNumber(flight.last_lon);
-      const speedKts = toNumber(flight.last_ground_speed_kts);
-      const heading = toNumber(flight.last_heading);
-      const seenAt = flight.last_seen_at ? new Date(flight.last_seen_at).getTime() : Date.now();
-
-      if (lat == null || lon == null || speedKts == null || heading == null) {
-        return lat == null || lon == null ? null : [lon, lat];
-      }
-
-      const elapsedSeconds = Math.min(25, Math.max(0, (Date.now() - seenAt) / 1000));
-      const distanceKm = speedKts * 1.852 * elapsedSeconds / 3600;
-      const headingRad = heading * Math.PI / 180;
-      const latRad = lat * Math.PI / 180;
-      const earthRadiusKm = 6371;
-      const projectedLat = lat + (distanceKm * Math.cos(headingRad) / earthRadiusKm) * 180 / Math.PI;
-      const projectedLon = lon + (distanceKm * Math.sin(headingRad) / (earthRadiusKm * Math.cos(latRad))) * 180 / Math.PI;
-      return [projectedLon, projectedLat];
-    }
-
     function tick() {
       for (const flight of liveFlights.current) {
         const marker = markers.current.get(flight.id);
