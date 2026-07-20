@@ -13,11 +13,19 @@ const db = new DatabaseSync(sqlitePath);
 db.exec("pragma foreign_keys = on");
 db.exec("pragma journal_mode = wal");
 
-function toSqlite(sql) {
-  return sql
-    .replace(/\$\d+/g, "?")
-    .replace(/now\(\)/gi, "datetime('now')")
-    .replace(/count\(\*\)::int/gi, "count(*)");
+function toSqlite(sql, params) {
+  const orderedParams = [];
+  const reorderedText = sql.replace(/\$(\d+)/g, (_match, index) => {
+    orderedParams.push(params[Number(index) - 1]);
+    return "?";
+  });
+
+  return {
+    sql: reorderedText
+      .replace(/now\(\)/gi, "datetime('now')")
+      .replace(/count\(\*\)::int/gi, "count(*)"),
+    params: orderedParams.length ? orderedParams : params
+  };
 }
 
 function bindValue(value) {
@@ -131,8 +139,9 @@ export async function migrate() {
 }
 
 export async function query(sql, params = []) {
-  const normalizedSql = toSqlite(sql);
-  const normalizedParams = params.map(bindValue);
+  const normalized = toSqlite(sql, params);
+  const normalizedSql = normalized.sql;
+  const normalizedParams = normalized.params.map(bindValue);
   const statement = db.prepare(normalizedSql);
   const lower = normalizedSql.trim().toLowerCase();
 
