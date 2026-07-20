@@ -33,6 +33,10 @@ const airlineIataToIcao = {
 
 function normalizeFlightIdent(flightNumber) {
   const compact = flightNumber.replace(/\s+/g, "").toUpperCase();
+  if (/^[A-Z]{3}\d/.test(compact)) {
+    return compact;
+  }
+
   const match = compact.match(/^([A-Z0-9]{2})(\d.*)$/);
   if (!match) {
     return compact;
@@ -176,7 +180,7 @@ async function openskyLookup(flight) {
     ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` }
     : {};
   const data = await fetchJson("https://opensky-network.org/api/states/all", { headers });
-  const callsign = flight.flight_number.replace(/\s+/g, "").toUpperCase();
+  const callsign = normalizeFlightIdent(flight.flight_number);
   const match = (data.states || []).find((state) => String(state[1] || "").trim().replace(/\s+/g, "") === callsign);
 
   if (!match) {
@@ -196,7 +200,7 @@ async function openskyLookup(flight) {
 }
 
 async function adsbLolLookup(flight) {
-  const callsign = flight.flight_number.replace(/\s+/g, "").toUpperCase();
+  const callsign = normalizeFlightIdent(flight.flight_number);
   const data = await fetchJson(`https://api.adsb.lol/v2/callsign/${encodeURIComponent(callsign)}`);
   const aircraft = data.ac?.[0];
 
