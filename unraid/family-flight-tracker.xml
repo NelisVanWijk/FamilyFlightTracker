@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>FamilyFlightTracker</Name>
+  <Repository>ghcr.io/nelisvanwijk/family-flight-tracker:latest</Repository>
+  <Registry>https://github.com/NelisVanWijk/FamilyFlightTracker/pkgs/container/family-flight-tracker</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/NelisVanWijk/FamilyFlightTracker/issues</Support>
+  <Project>https://github.com/NelisVanWijk/FamilyFlightTracker</Project>
+  <Overview><![CDATA[Self-hosted app om familievluchten te volgen, live posities op een kaart te tonen en vluchtgeschiedenis in Postgres te bewaren. Deze template start alleen de app-container; gebruik daarnaast een Postgres-container of database en vul DATABASE_URL in.]]></Overview>
+  <Category>Tools: Status: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/NelisVanWijk/FamilyFlightTracker/main/unraid/family-flight-tracker.xml</TemplateURL>
+  <Icon/>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Postgres 14 of nieuwer. Maak bijvoorbeeld een aparte Postgres-container op hetzelfde Docker-netwerk.</Requires>
+  <Config Name="Web UI" Target="8080" Default="8080" Mode="tcp" Description="Webinterface en API-poort." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="DATABASE_URL" Target="DATABASE_URL" Default="postgres://flights:flights@family-flight-postgres:5432/flights" Description="Postgres connectiestring. Plaats app en database bij voorkeur op hetzelfde custom Docker-netwerk." Type="Variable" Display="always" Required="true" Mask="false">postgres://flights:flights@family-flight-postgres:5432/flights</Config>
+  <Config Name="JWT_SECRET" Target="JWT_SECRET" Default="" Description="Lange willekeurige secret voor login tokens. Vereist voor productie." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="FLIGHT_PROVIDER" Target="FLIGHT_PROVIDER" Default="demo" Description="Bron voor vluchtposities: demo, opensky, adsblol, flightaware of fr24." Type="Variable" Display="always" Required="true" Mask="false">demo</Config>
+  <Config Name="OPENSKY_CLIENT_ID" Target="OPENSKY_CLIENT_ID" Default="" Description="Optionele OpenSky client ID." Type="Variable" Display="advanced-hide" Required="false" Mask="false"/>
+  <Config Name="OPENSKY_CLIENT_SECRET" Target="OPENSKY_CLIENT_SECRET" Default="" Description="Optionele OpenSky client secret." Type="Variable" Display="advanced-hide" Required="false" Mask="true"/>
+  <Config Name="FLIGHTAWARE_API_KEY" Target="FLIGHTAWARE_API_KEY" Default="" Description="Optionele FlightAware AeroAPI key." Type="Variable" Display="advanced-hide" Required="false" Mask="true"/>
+  <Config Name="FR24_API_KEY" Target="FR24_API_KEY" Default="" Description="Optionele Flightradar24 API key." Type="Variable" Display="advanced-hide" Required="false" Mask="true"/>
+</Container>
