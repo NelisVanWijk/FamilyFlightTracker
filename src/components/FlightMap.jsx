@@ -15,6 +15,16 @@ const style = {
   layers: [{ id: "dark", type: "raster", source: "dark" }]
 };
 
+const airportFallbacks = {
+  AMS: { lat: 52.308601, lon: 4.76389 },
+  YUL: { lat: 45.4706, lon: -73.740799 },
+  BCN: { lat: 41.2974, lon: 2.0833 },
+  LHR: { lat: 51.47, lon: -0.4543 },
+  JFK: { lat: 40.6413, lon: -73.7781 },
+  DXB: { lat: 25.2532, lon: 55.3657 },
+  CDG: { lat: 49.0097, lon: 2.5479 }
+};
+
 function toNumber(value) {
   if (value == null) return null;
   const parsed = Number(value);
@@ -134,9 +144,17 @@ function trailFeature(flight) {
 }
 
 function plannedRouteFeature(flight) {
-  const coordinates = (flight.planned_route?._airports || [])
+  let coordinates = (flight.planned_route?._airports || [])
     .map((airport) => [toNumber(airport.lon), toNumber(airport.lat)])
     .filter(([lon, lat]) => lon != null && lat != null);
+
+  if (coordinates.length < 2) {
+    const origin = airportFallbacks[flight.origin_iata];
+    const destination = airportFallbacks[flight.destination_iata];
+    if (origin && destination) {
+      coordinates = [[origin.lon, origin.lat], [destination.lon, destination.lat]];
+    }
+  }
 
   if (coordinates.length < 2) {
     return null;
@@ -149,6 +167,34 @@ function plannedRouteFeature(flight) {
   };
 }
 
+function remainingRouteFeature(flight) {
+  const currentLat = toNumber(flight.last_lat);
+  const currentLon = toNumber(flight.last_lon);
+  if (currentLat == null || currentLon == null) {
+    return null;
+  }
+
+  const plannedAirports = flight.planned_route?._airports || [];
+  const plannedDestination = plannedAirports.at(-1);
+  const fallbackDestination = airportFallbacks[flight.destination_iata];
+  const destination = plannedDestination || fallbackDestination;
+  const destinationLat = toNumber(destination?.lat);
+  const destinationLon = toNumber(destination?.lon);
+
+  if (destinationLat == null || destinationLon == null) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    properties: { id: flight.id },
+    geometry: {
+      type: "LineString",
+      coordinates: [[currentLon, currentLat], [destinationLon, destinationLat]]
+    }
+  };
+}
+
 export function FlightMap({ flights, selectedFlight, onSelect }) {
   const container = useRef(null);
   const map = useRef(null);
@@ -156,6 +202,19 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
   const liveFrame = useRef(null);
   const liveFlights = useRef([]);
   const centeredFlightId = useRef(null);
+
+  function setSourceData(sourceId, features) {
+    const source = map.current?.getSource(sourceId);
+    if (source) {
+      source.setData({ type: "FeatureCollection", features });
+    }
+  }
+
+  function syncRouteSources(nextFlights) {
+    setSourceData("planned-routes", nextFlights.map(plannedRouteFeature).filter(Boolean));
+    setSourceData("remaining-routes", nextFlights.map(remainingRouteFeature).filter(Boolean));
+    setSourceData("flight-trails", nextFlights.map(trailFeature).filter(Boolean));
+  }
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -179,6 +238,10 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] }
       });
+      map.current.addSource("remaining-routes", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
       map.current.addLayer({
         id: "planned-routes",
         type: "line",
@@ -188,6 +251,26 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
           "line-width": 2,
           "line-opacity": 0.58,
           "line-dasharray": [2, 2]
+        }
+      });
+      map.current.addLayer({
+        id: "remaining-routes-glow",
+        type: "line",
+        source: "remaining-routes",
+        paint: {
+          "line-color": "#ffce4a",
+          "line-width": 8,
+          "line-opacity": 0.12
+        }
+      });
+      map.current.addLayer({
+        id: "remaining-routes",
+        type: "line",
+        source: "remaining-routes",
+        paint: {
+          "line-color": "#ffce4a",
+          "line-width": 3,
+          "line-opacity": 0.86
         }
       });
       map.current.addLayer({
@@ -210,6 +293,7 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
           "line-opacity": 0.86
         }
       });
+      syncRouteSources(liveFlights.current);
     });
   }, []);
 
@@ -217,21 +301,7 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
     if (!map.current) return;
     liveFlights.current = flights;
 
-    const trailSource = map.current.getSource("flight-trails");
-    if (trailSource) {
-      trailSource.setData({
-        type: "FeatureCollection",
-        features: flights.map(trailFeature).filter(Boolean)
-      });
-    }
-
-    const plannedSource = map.current.getSource("planned-routes");
-    if (plannedSource) {
-      plannedSource.setData({
-        type: "FeatureCollection",
-        features: flights.map(plannedRouteFeature).filter(Boolean)
-      });
-    }
+    syncRouteSources(flights);
 
     const activeIds = new Set();
     flights.forEach((flight) => {
