@@ -8,6 +8,7 @@ Self-hosted Docker app om familievluchten te volgen, live posities op een kaart 
 - Vluchten koppelen aan een familielid.
 - Live kaart met MapLibre en OpenStreetMap tiles.
 - Automatisch opslaan van positiepunten en events in een lokale SQLite database.
+- ADSB.lol trace-import voor de afgelegde route vanaf vertrek, voor zover de tar1090 trace beschikbaar is.
 - Docker Compose met een app-container.
 - Providerlaag voor `demo`, `opensky`, `adsblol`, `flightaware` en `fr24`.
 
@@ -53,6 +54,8 @@ docker run -p 8080:8080 `
   -e ADMIN_EMAIL="admin@example.com" `
   -e ADMIN_PASSWORD="maak-hier-een-admin-wachtwoord" `
   -e FLIGHT_PROVIDER="adsblol" `
+  -e ADSBLOL_TRACE_IMPORT_INTERVAL_MINUTES="10" `
+  -e ADSBLOL_TRACE_FALLBACK_MAX_AGE_MINUTES="45" `
   ghcr.io/nelisvanwijk/family-flight-tracker:latest
 ```
 
@@ -81,6 +84,8 @@ Vul in de template minimaal deze velden in:
 - `ADMIN_EMAIL`: e-mailadres voor het eerste admin-account.
 - `ADMIN_PASSWORD`: wachtwoord voor het eerste admin-account.
 - `FLIGHT_PROVIDER`: laat op `adsblol` staan voor gratis ADS-B posities.
+- `ADSBLOL_TRACE_IMPORT_INTERVAL_MINUTES`: laat op `10` staan om ontbrekende routepunten uit ADSB.lol traces bij te vullen.
+- `ADSBLOL_TRACE_FALLBACK_MAX_AGE_MINUTES`: laat op `45` staan zodat recente tracepunten gebruikt mogen worden wanneer de live API tijdelijk niets teruggeeft.
 
 ## Live databron instellen
 
@@ -97,6 +102,12 @@ Beschikbare opties:
 - `adsblol`: zoekt gratis live ADS-B data via callsign. Aanbevolen standaard voor deze prive-app.
 - `flightaware`: optioneel; gebruikt FlightAware AeroAPI voor vluchtstatus, tijden, gates, delays en trackposities. Let op: AeroAPI kan per query kosten.
 - `fr24`: placeholder voor Flightradar24 API integratie.
+
+Met `FLIGHT_PROVIDER=adsblol` haalt de app de live positie op via `api.adsb.lol` en importeert daarnaast periodiek de tar1090 trace-bestanden `trace_full` en `trace_recent`. Daardoor kan de kaart de afgelegde route vanaf vertrek tonen, ook als de app pas na vertrek is gestart. De import draait standaard eens per 10 minuten en is uit te zetten met:
+
+```env
+ADSBLOL_TRACE_IMPORT_INTERVAL_MINUTES=0
+```
 
 Daarna opnieuw starten:
 

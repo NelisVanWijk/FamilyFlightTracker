@@ -83,6 +83,165 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+function compactCallsign(value) {
+  return String(value || "").trim().replace(/\s+/g, "").toUpperCase();
+}
+
+function traceNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function traceAltitude(value) {
+  if (value === "ground") {
+    return 0;
+  }
+  return traceNumber(value);
+}
+
+function normalizeHex(value) {
+  const hex = String(value || "").trim().toLowerCase();
+  return /^[a-f0-9]{6}$/.test(hex) ? hex : null;
+}
+
+function normalizeTracePoints(traceData, callsign) {
+  if (!traceData?.trace?.length || !Number.isFinite(Number(traceData.timestamp))) {
+    return [];
+  }
+
+  const targetCallsign = compactCallsign(callsign);
+  const segments = [];
+  let segment = null;
+  let activeCallsign = null;
+  let activeDetail = null;
+
+  for (const state of traceData.trace) {
+    if (!Array.isArray(state)) {
+      continue;
+    }
+
+    const detail = state[8];
+    if (detail && typeof detail === "object") {
+      activeDetail = { ...activeDetail, ...detail };
+    }
+    if (activeDetail?.flight) {
+      activeCallsign = compactCallsign(activeDetail.flight);
+    }
+
+    const timestamp = Number(traceData.timestamp) + Number(state[0] || 0);
+    const lat = traceNumber(state[1]);
+    const lon = traceNumber(state[2]);
+    const flags = Number(state[6] || 0);
+    const belongsToFlight = activeCallsign && activeCallsign === targetCallsign;
+
+    if (!belongsToFlight || lat == null || lon == null || !Number.isFinite(timestamp)) {
+      if (segment?.length) {
+        segments.push(segment);
+      }
+      segment = null;
+      continue;
+    }
+
+    if (!segment || (flags & 2)) {
+      if (segment?.length) {
+        segments.push(segment);
+      }
+      segment = [];
+    }
+
+    segment.push({
+      timestamp,
+      lat,
+      lon,
+      altitude_ft: traceAltitude(state[3]),
+      ground_speed_kts: traceNumber(state[4]),
+      heading: traceNumber(state[5]),
+      raw: {
+        ...(activeDetail || {}),
+        hex: traceData.icao,
+        registration: traceData.r,
+        r: activeDetail?.r || traceData.r,
+        aircraft_type: traceData.t,
+        t: activeDetail?.t || traceData.t,
+        flight: activeCallsign || targetCallsign,
+        trace_timestamp: traceData.timestamp,
+        trace_state: state
+      }
+    });
+  }
+
+  if (segment?.length) {
+    segments.push(segment);
+  }
+
+  return segments.at(-1) || [];
+}
+
+async function adsbLolTracePoints(hex, callsign, options = {}) {
+  const normalizedHex = normalizeHex(hex);
+  if (!normalizedHex) {
+    return [];
+  }
+
+  const suffix = normalizedHex.slice(-2);
+  const urls = options.recentOnly
+    ? [`https://adsb.lol/data/traces/${suffix}/trace_recent_${normalizedHex}.json`]
+    : [
+        `https://adsb.lol/data/traces/${suffix}/trace_full_${normalizedHex}.json`,
+        `https://adsb.lol/data/traces/${suffix}/trace_recent_${normalizedHex}.json`
+      ];
+
+  const results = await Promise.allSettled(urls.map((url) => fetchJson(url)));
+  const pointsByTimestamp = new Map();
+
+  for (const result of results) {
+    if (result.status !== "fulfilled") {
+      continue;
+    }
+    for (const point of normalizeTracePoints(result.value, callsign)) {
+      pointsByTimestamp.set(Math.round(point.timestamp * 1000), point);
+    }
+  }
+
+  return [...pointsByTimestamp.values()].sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export async function lookupAdsbLolTracePoints(flight, hex, options = {}) {
+  return adsbLolTracePoints(hex, normalizeFlightIdent(flight.flight_number), options);
+}
+
+function tracePointIsRecent(point) {
+  const maxAgeMinutes = Number(process.env.ADSBLOL_TRACE_FALLBACK_MAX_AGE_MINUTES || 45);
+  if (!point || maxAgeMinutes <= 0) {
+    return false;
+  }
+  return Date.now() / 1000 - point.timestamp <= maxAgeMinutes * 60;
+}
+
+function liveFromTracePoint(point, tracePoints) {
+  if (!point) {
+    return null;
+  }
+  return {
+    provider: "adsblol_trace",
+    status: "airborne",
+    provider_ref: point.raw?.hex || null,
+    lat: point.lat,
+    lon: point.lon,
+    altitude_ft: point.altitude_ft,
+    ground_speed_kts: point.ground_speed_kts,
+    heading: point.heading,
+    trace_attempted: true,
+    trace_points: tracePoints,
+    raw: {
+      ...(point.raw || {}),
+      trace_points_found: tracePoints.length,
+      trace_fallback: true,
+      seen_pos: Math.max(0, Date.now() / 1000 - point.timestamp)
+    }
+  };
+}
+
 function addDays(date, days) {
   const next = new Date(date);
   next.setUTCDate(next.getUTCDate() + days);
@@ -199,13 +358,33 @@ async function openskyLookup(flight) {
   };
 }
 
-async function adsbLolLookup(flight) {
+async function adsbLolLookup(flight, options = {}) {
   const callsign = normalizeFlightIdent(flight.flight_number);
-  const data = await fetchJson(`https://api.adsb.lol/v2/callsign/${encodeURIComponent(callsign)}`);
-  const aircraft = data.ac?.[0];
+  let providerError = null;
+  let data = null;
+  try {
+    data = await fetchJson(`https://api.adsb.lol/v2/callsign/${encodeURIComponent(callsign)}`);
+  } catch (error) {
+    providerError = error;
+  }
+  const aircraft = data?.ac?.[0];
 
   if (!aircraft || aircraft.lat == null || aircraft.lon == null) {
-    return null;
+    const fallbackHex = normalizeHex(flight.provider_ref);
+    if (!fallbackHex) {
+      if (providerError) {
+        throw providerError;
+      }
+      return null;
+    }
+
+    const tracePoints = await adsbLolTracePoints(fallbackHex, callsign, {
+      recentOnly: !options.includeTrace
+    });
+    const latestTracePoint = tracePoints.at(-1);
+    return tracePointIsRecent(latestTracePoint)
+      ? liveFromTracePoint(latestTracePoint, options.includeTrace ? tracePoints : [])
+      : null;
   }
 
   let plannedRoute = null;
@@ -217,16 +396,32 @@ async function adsbLolLookup(flight) {
     }
   }
 
+  let tracePoints = [];
+  let traceError = null;
+  const traceAttempted = Boolean(options.includeTrace && aircraft.hex);
+  if (traceAttempted) {
+    try {
+      tracePoints = await adsbLolTracePoints(aircraft.hex, callsign);
+    } catch (error) {
+      traceError = error.message;
+    }
+  }
+
   return {
     provider: "adsblol",
     status: "airborne",
+    provider_ref: aircraft.hex || null,
     lat: aircraft.lat,
     lon: aircraft.lon,
     altitude_ft: aircraft.alt_baro === "ground" ? 0 : aircraft.alt_baro,
     ground_speed_kts: aircraft.gs,
     heading: aircraft.track,
     planned_route: plannedRoute,
+    trace_attempted: traceAttempted,
+    trace_points: tracePoints,
     raw: aircraft
+      ? { ...aircraft, trace_error: traceError || undefined, trace_points_found: tracePoints.length }
+      : aircraft
   };
 }
 
@@ -314,7 +509,7 @@ async function flightAwareLookup(flight) {
   return live;
 }
 
-export async function lookupFlight(flight) {
+export async function lookupFlight(flight, options = {}) {
   const provider = (process.env.FLIGHT_PROVIDER || "demo").toLowerCase();
 
   try {
@@ -322,7 +517,7 @@ export async function lookupFlight(flight) {
       return await openskyLookup(flight);
     }
     if (provider === "adsblol") {
-      return await adsbLolLookup(flight);
+      return await adsbLolLookup(flight, options);
     }
     if (provider === "flightaware") {
       return await flightAwareLookup(flight);

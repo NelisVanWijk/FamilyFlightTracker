@@ -103,6 +103,7 @@ export async function migrate() {
       actual_departure text,
       actual_arrival text,
       planned_route_raw text,
+      trace_last_imported_at text,
       created_at text not null default (datetime('now')),
       updated_at text not null default (datetime('now'))
     );
@@ -128,6 +129,9 @@ export async function migrate() {
       message text not null,
       raw text
     );
+
+    create index if not exists idx_flight_positions_dedupe
+      on flight_positions (tracked_flight_id, source, captured_at);
   `);
 
   for (const statement of [
@@ -139,7 +143,8 @@ export async function migrate() {
     "alter table tracked_flights add column arrival_delay_seconds integer",
     "alter table tracked_flights add column actual_departure text",
     "alter table tracked_flights add column actual_arrival text",
-    "alter table tracked_flights add column planned_route_raw text"
+    "alter table tracked_flights add column planned_route_raw text",
+    "alter table tracked_flights add column trace_last_imported_at text"
   ]) {
     try {
       db.exec(statement);
