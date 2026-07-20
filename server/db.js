@@ -179,12 +179,11 @@ export async function getFlightsForUser(userId) {
     select id, captured_at, lat, lon, altitude_ft, ground_speed_kts, heading, source, raw
     from flight_positions
     where tracked_flight_id = ?
-    order by captured_at desc, id desc
-    limit 80
+    order by captured_at asc, id asc
   `);
 
   return flights.map((flight) => {
-    const positions = positionsStatement.all(flight.id).reverse().map((position) => ({
+    const positions = positionsStatement.all(flight.id).map((position) => ({
       ...position,
       raw: parseJson(position.raw)
     }));
