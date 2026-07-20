@@ -78,44 +78,51 @@ function createAirportElement(code, type) {
   return element;
 }
 
-function animateMarker(marker, nextLngLat) {
-  const start = marker.getLngLat();
-  const startTime = performance.now();
-  const duration = 850;
-
-  function frame(now) {
-    const progress = Math.min(1, (now - startTime) / duration);
-    const eased = 1 - Math.pow(1 - progress, 3);
-    const lng = start.lng + (nextLngLat[0] - start.lng) * eased;
-    const lat = start.lat + (nextLngLat[1] - start.lat) * eased;
-    marker.setLngLat([lng, lat]);
-    if (progress < 1) {
-      requestAnimationFrame(frame);
-    }
-  }
-
-  requestAnimationFrame(frame);
-}
-
-function projectedLngLat(flight) {
+function rawLngLat(flight) {
   const lat = toNumber(flight.last_lat);
   const lon = toNumber(flight.last_lon);
-  const speedKts = toNumber(flight.last_ground_speed_kts);
-  const heading = toNumber(flight.last_heading);
-  const seenAt = parseAppTimestamp(flight.last_seen_at)?.getTime() || Date.now();
+  return lat == null || lon == null ? null : [lon, lat];
+}
 
-  if (lat == null || lon == null || speedKts == null || heading == null) {
-    return lat == null || lon == null ? null : [lon, lat];
+function coordinateKey(flight) {
+  const target = rawLngLat(flight);
+  return target ? `${flight.id}:${target[0]}:${target[1]}:${flight.last_seen_at || ""}` : flight.id;
+}
+
+function latestPositionCoordinate(flight, offset = 0) {
+  const positions = flight.positions || [];
+  const position = positions.at(-1 - offset);
+  const lat = toNumber(position?.lat);
+  const lon = toNumber(position?.lon);
+  return lat == null || lon == null ? null : [lon, lat];
+}
+
+function movementDuration(flight) {
+  const positions = flight.positions || [];
+  const latest = positions.at(-1);
+  const previous = positions.at(-2);
+  const latestTime = parseAppTimestamp(latest?.captured_at)?.getTime();
+  const previousTime = parseAppTimestamp(previous?.captured_at)?.getTime();
+
+  if (latestTime && previousTime && latestTime > previousTime) {
+    return Math.min(12000, Math.max(3000, (latestTime - previousTime) * 0.85));
   }
 
-  const elapsedSeconds = Math.min(25, Math.max(0, (Date.now() - seenAt) / 1000));
-  const distanceKm = speedKts * 1.852 * elapsedSeconds / 3600;
-  const headingRad = heading * Math.PI / 180;
-  const latRad = lat * Math.PI / 180;
-  const earthRadiusKm = 6371;
-  const projectedLat = lat + (distanceKm * Math.cos(headingRad) / earthRadiusKm) * 180 / Math.PI;
-  const projectedLon = lon + (distanceKm * Math.sin(headingRad) / (earthRadiusKm * Math.cos(latRad))) * 180 / Math.PI;
-  return [projectedLon, projectedLat];
+  return 4500;
+}
+
+function currentMovementPosition(state, now = performance.now()) {
+  if (!state) return null;
+  if (!state.duration) return state.to;
+
+  const progress = Math.min(1, Math.max(0, (now - state.startTime) / state.duration));
+  const eased = progress < 0.5
+    ? 2 * progress * progress
+    : 1 - ((-2 * progress + 2) ** 2) / 2;
+  return [
+    state.from[0] + (state.to[0] - state.from[0]) * eased,
+    state.from[1] + (state.to[1] - state.from[1]) * eased
+  ];
 }
 
 function trailFeature(flight) {
@@ -242,11 +249,28 @@ function remainingRouteFeature(flight) {
   };
 }
 
+function liveMotionFeature(flight, markerCoordinate) {
+  const previous = latestPositionCoordinate(flight, 1) || latestPositionCoordinate(flight);
+  if (!previous || !markerCoordinate || distanceKm(previous, markerCoordinate) < 0.3) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    properties: { id: flight.id },
+    geometry: {
+      type: "LineString",
+      coordinates: [previous, markerCoordinate]
+    }
+  };
+}
+
 export function FlightMap({ flights, selectedFlight, onSelect }) {
   const container = useRef(null);
   const map = useRef(null);
   const markers = useRef(new Map());
   const airportMarkers = useRef(new Map());
+  const movementStates = useRef(new Map());
   const liveFrame = useRef(null);
   const liveFlights = useRef([]);
   const centeredFlightId = useRef(null);
@@ -258,11 +282,25 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
     }
   }
 
-function syncRouteSources(nextFlights) {
+  function syncRouteSources(nextFlights) {
     setSourceData("planned-routes", nextFlights.map(plannedRouteFeature).filter(Boolean));
     setSourceData("origin-connectors", nextFlights.map(originConnectorFeature).filter(Boolean));
     setSourceData("remaining-routes", nextFlights.map(remainingRouteFeature).filter(Boolean));
     setSourceData("flight-trails", nextFlights.map(trailFeature).filter(Boolean));
+  }
+
+  function syncLiveMotionSource() {
+    const features = [];
+    for (const flight of liveFlights.current) {
+      const marker = markers.current.get(flight.id);
+      if (!marker) continue;
+      const position = marker.getLngLat();
+      const feature = liveMotionFeature(flight, [position.lng, position.lat]);
+      if (feature) {
+        features.push(feature);
+      }
+    }
+    setSourceData("live-motion-trails", features);
   }
 
   useEffect(() => {
@@ -292,6 +330,10 @@ function syncRouteSources(nextFlights) {
         data: { type: "FeatureCollection", features: [] }
       });
       map.current.addSource("remaining-routes", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+      map.current.addSource("live-motion-trails", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] }
       });
@@ -357,6 +399,16 @@ function syncRouteSources(nextFlights) {
           "line-opacity": 0.86
         }
       });
+      map.current.addLayer({
+        id: "live-motion-trails",
+        type: "line",
+        source: "live-motion-trails",
+        paint: {
+          "line-color": "#23d0b2",
+          "line-width": 3,
+          "line-opacity": 0.92
+        }
+      });
       syncRouteSources(liveFlights.current);
     });
   }, []);
@@ -391,19 +443,36 @@ function syncRouteSources(nextFlights) {
         }
       });
 
-      const lat = toNumber(flight.last_lat);
-      const lon = toNumber(flight.last_lon);
-      if (lat == null || lon == null) return;
+      const target = rawLngLat(flight);
+      if (!target) return;
 
       activeIds.add(flight.id);
       let marker = markers.current.get(flight.id);
       if (!marker) {
         const element = createPlaneElement();
         element.addEventListener("click", () => onSelect(flight.id));
-        marker = new maplibregl.Marker({ element, anchor: "center" }).setLngLat([lon, lat]).addTo(map.current);
+        marker = new maplibregl.Marker({ element, anchor: "center" }).setLngLat(target).addTo(map.current);
         markers.current.set(flight.id, marker);
+        movementStates.current.set(flight.id, {
+          key: coordinateKey(flight),
+          from: target,
+          to: target,
+          startTime: performance.now(),
+          duration: 0
+        });
       } else {
-        animateMarker(marker, projectedLngLat(flight) || [lon, lat]);
+        const key = coordinateKey(flight);
+        const state = movementStates.current.get(flight.id);
+        if (!state || state.key !== key) {
+          const current = marker.getLngLat();
+          movementStates.current.set(flight.id, {
+            key,
+            from: [current.lng, current.lat],
+            to: target,
+            startTime: performance.now(),
+            duration: movementDuration(flight)
+          });
+        }
       }
 
       const element = marker.getElement();
@@ -416,6 +485,7 @@ function syncRouteSources(nextFlights) {
       if (!activeIds.has(id)) {
         marker.remove();
         markers.current.delete(id);
+        movementStates.current.delete(id);
       }
     });
 
@@ -444,11 +514,12 @@ function syncRouteSources(nextFlights) {
     function tick() {
       for (const flight of liveFlights.current) {
         const marker = markers.current.get(flight.id);
-        const next = marker ? projectedLngLat(flight) : null;
+        const next = marker ? currentMovementPosition(movementStates.current.get(flight.id)) : null;
         if (marker && next) {
           marker.setLngLat(next);
         }
       }
+      syncLiveMotionSource();
       liveFrame.current = requestAnimationFrame(tick);
     }
 
