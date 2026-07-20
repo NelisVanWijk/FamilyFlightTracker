@@ -9,6 +9,7 @@ Self-hosted Docker app om familievluchten te volgen, live posities op een kaart 
 - Live kaart met MapLibre en OpenStreetMap tiles.
 - Automatisch opslaan van positiepunten en events in een lokale SQLite database.
 - ADSB.lol trace-import voor de afgelegde route vanaf vertrek, voor zover de tar1090 trace beschikbaar is.
+- Nederlandse weergave met tijden in Europe/Amsterdam en metrische units op het scherm.
 - Docker Compose met een app-container.
 - Providerlaag voor `demo`, `opensky`, `adsblol`, `flightaware` en `fr24`.
 

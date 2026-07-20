@@ -5,6 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";
 import { FlightMap } from "./components/FlightMap.jsx";
 import { api } from "./lib/api.js";
+import { formatHeading, formatKmhFromKnots, formatLocalDate, formatMetersFromFeet, formatMetersPerMinuteFromFeet } from "./lib/format.js";
 
 function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState("login");
@@ -67,7 +68,7 @@ function AuthScreen({ onAuth }) {
 }
 
 function FlightForm({ onCreate }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatLocalDate();
   const [form, setForm] = useState({
     passenger_name: "",
     flight_number: "",
@@ -140,11 +141,6 @@ function FlightForm({ onCreate }) {
   );
 }
 
-function numberOrDash(value, suffix = "") {
-  const number = Number(value);
-  return Number.isFinite(number) ? `${Math.round(number)}${suffix}` : "-";
-}
-
 function FlightList({ flights, selectedId, onSelect, onRefresh, onArchive, onDelete }) {
   return (
     <div className="flight-list">
@@ -190,14 +186,14 @@ function FlightCard({ flight, selected, onSelect, onRefresh, onArchive, onDelete
             <span>{flight.destination_iata || "???"}</span>
           </div>
           <div className="metrics">
-            <span><Gauge size={14} /> {numberOrDash(flight.last_altitude_ft, " ft")}</span>
-            <span>{numberOrDash(flight.last_ground_speed_kts, " kt")}</span>
-            <span><Navigation size={14} /> {numberOrDash(flight.last_heading, " deg")}</span>
+            <span><Gauge size={14} /> {formatMetersFromFeet(flight.last_altitude_ft)}</span>
+            <span>{formatKmhFromKnots(flight.last_ground_speed_kts)}</span>
+            <span><Navigation size={14} /> {formatHeading(flight.last_heading)}</span>
           </div>
           <div className="adsb-details">
             <span>{raw.r || "geen registratie"}</span>
             <span>{raw.t || "geen type"}</span>
-            <span>VS {numberOrDash(raw.baro_rate, " ft/min")}</span>
+            <span>VS {formatMetersPerMinuteFromFeet(raw.baro_rate)}</span>
             <span>{flight.provider}</span>
           </div>
           <div className="card-actions">

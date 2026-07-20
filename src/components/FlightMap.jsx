@@ -1,6 +1,15 @@
 import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Activity, Gauge, Navigation, Plane, Radio, Signal } from "lucide-react";
+import {
+  formatHeading,
+  formatKmhFromKnots,
+  formatLocalTime,
+  formatMetersFromFeet,
+  formatMetersPerMinuteFromFeet,
+  parseAppTimestamp,
+  toNumber
+} from "../lib/format.js";
 
 const style = {
   version: 8,
@@ -24,26 +33,6 @@ const airportFallbacks = {
   DXB: { lat: 25.2532, lon: 55.3657 },
   CDG: { lat: 49.0097, lon: 2.5479 }
 };
-
-function toNumber(value) {
-  if (value == null) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatNumber(value, suffix = "") {
-  const number = toNumber(value);
-  return number == null ? "-" : `${Math.round(number)}${suffix}`;
-}
-
-function formatTime(value) {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("nl-NL", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).format(new Date(value));
-}
 
 function rawOf(flight) {
   return flight?.latest_position_raw || {};
@@ -113,7 +102,7 @@ function projectedLngLat(flight) {
   const lon = toNumber(flight.last_lon);
   const speedKts = toNumber(flight.last_ground_speed_kts);
   const heading = toNumber(flight.last_heading);
-  const seenAt = flight.last_seen_at ? new Date(flight.last_seen_at).getTime() : Date.now();
+  const seenAt = parseAppTimestamp(flight.last_seen_at)?.getTime() || Date.now();
 
   if (lat == null || lon == null || speedKts == null || heading == null) {
     return lat == null || lon == null ? null : [lon, lat];
@@ -133,7 +122,7 @@ function trailFeature(flight) {
   const points = (flight.positions || [])
     .map((position) => ({
       coordinate: [toNumber(position.lon), toNumber(position.lat)],
-      capturedAt: position.captured_at ? new Date(position.captured_at).getTime() : null
+      capturedAt: parseAppTimestamp(position.captured_at)?.getTime() || null
     }))
     .filter((point) => point.coordinate[0] != null && point.coordinate[1] != null);
 
@@ -420,7 +409,7 @@ function syncRouteSources(nextFlights) {
       const element = marker.getElement();
       element.querySelector(".plane-marker-airframe").style.rotate = `${Number(flight.last_heading || 0)}deg`;
       element.classList.toggle("active", selectedFlight?.id === flight.id);
-      element.title = `${flight.flight_number} ${formatNumber(flight.last_altitude_ft, " ft")} ${formatNumber(flight.last_ground_speed_kts, " kt")}`;
+      element.title = `${flight.flight_number} ${formatMetersFromFeet(flight.last_altitude_ft)} ${formatKmhFromKnots(flight.last_ground_speed_kts)}`;
     });
 
     markers.current.forEach((marker, id) => {
@@ -486,15 +475,15 @@ function syncRouteSources(nextFlights) {
         </div>
         {selectedFlight && (
           <div className="radar-grid">
-            <span><Gauge size={15} /> {formatNumber(selectedFlight.last_altitude_ft, " ft")}</span>
-            <span><Activity size={15} /> {formatNumber(selectedFlight.last_ground_speed_kts, " kt")}</span>
-            <span><Navigation size={15} /> {formatNumber(selectedFlight.last_heading, " deg")}</span>
+            <span><Gauge size={15} /> {formatMetersFromFeet(selectedFlight.last_altitude_ft)}</span>
+            <span><Activity size={15} /> {formatKmhFromKnots(selectedFlight.last_ground_speed_kts)}</span>
+            <span><Navigation size={15} /> {formatHeading(selectedFlight.last_heading)}</span>
             <span><Radio size={15} /> {raw.flight?.trim() || selectedFlight.flight_number}</span>
             <span><Signal size={15} /> {raw.rssi ? `${raw.rssi} dB` : "-"}</span>
             <span>{raw.r || "-"} {raw.t ? `- ${raw.t}` : ""}</span>
             <span>Squawk {raw.squawk || "-"}</span>
-            <span>VS {formatNumber(raw.baro_rate, " ft/min")}</span>
-            <span>Laatst {formatTime(selectedFlight.last_seen_at)}</span>
+            <span>VS {formatMetersPerMinuteFromFeet(raw.baro_rate)}</span>
+            <span>Laatst {formatLocalTime(selectedFlight.last_seen_at)}</span>
           </div>
         )}
       </section>
