@@ -187,6 +187,13 @@ textarea {
   padding: 7px 10px;
 }
 
+.card-actions .danger-button {
+  color: #9a2f22;
+  border-color: #efc7bf;
+  background: #fff4f1;
+  min-width: 38px;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 420px minmax(0, 1fr);
@@ -288,6 +295,22 @@ textarea {
   font-size: 13px;
 }
 
+.metrics span,
+.adsb-details span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.adsb-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-top: 10px;
+  color: #526873;
+  font-size: 12px;
+}
+
 .card-actions {
   justify-content: flex-end;
   margin-top: 12px;
@@ -318,43 +341,90 @@ textarea {
   inset: 0;
 }
 
-.map-overlay {
+.radar-panel {
   position: absolute;
   left: 18px;
   top: 18px;
   z-index: 2;
+  width: min(420px, calc(100% - 36px));
+  background: rgba(11, 22, 29, 0.88);
+  border: 1px solid rgba(106, 232, 210, 0.22);
+  border-radius: 8px;
+  padding: 12px;
+  color: #ecfbf8;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.radar-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.radar-title strong,
+.radar-title span {
+  display: block;
+}
+
+.radar-title span {
+  color: #9db4bd;
+  font-size: 12px;
+}
+
+.radar-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.radar-grid span {
+  min-height: 30px;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  max-width: calc(100% - 36px);
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid #d8e1e7;
-  border-radius: 8px;
-  padding: 10px 12px;
-  color: #26343c;
-  box-shadow: 0 10px 30px rgba(21, 38, 48, 0.12);
+  gap: 5px;
+  color: #d6efea;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 7px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plane-marker {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border: 0;
   display: grid;
   place-items: center;
   background: transparent;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.35));
 }
 
-.plane-marker span {
-  display: block;
-  width: 34px;
-  height: 34px;
-  background: #126f7a;
-  clip-path: polygon(50% 0, 62% 38%, 98% 50%, 62% 62%, 50% 100%, 38% 62%, 2% 50%, 38% 38%);
-  box-shadow: 0 8px 22px rgba(18, 111, 122, 0.38);
+.plane-marker-airframe {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  transform-origin: center;
+  transition: rotate 500ms ease;
 }
 
-.plane-marker.active span {
-  background: #d65f33;
+.plane-marker-airframe svg {
+  width: 42px;
+  height: 42px;
+  fill: #1fe0bd;
+  stroke: #071a1f;
+  stroke-width: 2;
+}
+
+.plane-marker.active .plane-marker-airframe svg {
+  fill: #ffce4a;
+  stroke: #1c1604;
 }
 
 @media (max-width: 940px) {

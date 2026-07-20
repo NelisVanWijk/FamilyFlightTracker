@@ -113,6 +113,16 @@ app.patch("/api/flights/:id/archive", requireAuth, async (req, res) => {
   res.json({ flight: rows[0] });
 });
 
+app.delete("/api/flights/:id", requireAuth, async (req, res) => {
+  const existing = await query("select id from tracked_flights where id = $1 and user_id = $2", [req.params.id, req.user.id]);
+  if (!existing.rows[0]) {
+    return res.status(404).json({ error: "Vlucht niet gevonden." });
+  }
+
+  await query("delete from tracked_flights where id = $1 and user_id = $2", [req.params.id, req.user.id]);
+  res.json({ ok: true });
+});
+
 const distPath = path.join(__dirname, "..", "dist");
 app.use(express.static(distPath));
 app.get(/^\/(?!api).*/, (_req, res) => {
@@ -121,7 +131,8 @@ app.get(/^\/(?!api).*/, (_req, res) => {
 
 await migrate();
 await ensureAdminUser();
-setInterval(() => updateActiveFlights().catch((error) => console.error("Tracker update mislukt", error)), 60_000);
+const trackerIntervalMs = Math.max(5, Number(process.env.TRACKER_INTERVAL_SECONDS || 15)) * 1000;
+setInterval(() => updateActiveFlights().catch((error) => console.error("Tracker update mislukt", error)), trackerIntervalMs);
 updateActiveFlights().catch(() => {});
 
 app.listen(port, () => {

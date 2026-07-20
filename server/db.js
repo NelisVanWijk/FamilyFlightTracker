@@ -50,6 +50,17 @@ function normalizeRow(row) {
   return row;
 }
 
+function parseJson(value) {
+  if (!value || typeof value !== "string") {
+    return value || null;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 export async function migrate() {
   db.exec(`
     create table if not exists users (
@@ -163,15 +174,25 @@ export async function getFlightsForUser(userId) {
   `).all(userId).map(normalizeRow);
 
   const positionsStatement = db.prepare(`
-    select captured_at, lat, lon, altitude_ft, ground_speed_kts, heading, source
+    select captured_at, lat, lon, altitude_ft, ground_speed_kts, heading, source, raw
     from flight_positions
     where tracked_flight_id = ?
     order by captured_at desc
     limit 80
   `);
 
-  return flights.map((flight) => ({
-    ...flight,
-    positions: positionsStatement.all(flight.id).reverse()
-  }));
+  return flights.map((flight) => {
+    const positions = positionsStatement.all(flight.id).reverse().map((position) => ({
+      ...position,
+      raw: parseJson(position.raw)
+    }));
+    const latestPosition = positions.at(-1);
+
+    return {
+      ...flight,
+      positions,
+      latest_position_raw: latestPosition?.raw || null,
+      last_seen_at: latestPosition?.captured_at || flight.updated_at
+    };
+  });
 }

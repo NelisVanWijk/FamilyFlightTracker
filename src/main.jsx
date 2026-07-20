@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { CalendarDays, LogOut, Plane, Plus, RefreshCcw, Route, ShieldCheck, User } from "lucide-react";
+import { CalendarDays, Gauge, LogOut, Navigation, Plane, Plus, RefreshCcw, Route, ShieldCheck, Trash2, User } from "lucide-react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";
 import { FlightMap } from "./components/FlightMap.jsx";
@@ -140,7 +140,12 @@ function FlightForm({ onCreate }) {
   );
 }
 
-function FlightList({ flights, selectedId, onSelect, onRefresh, onArchive }) {
+function numberOrDash(value, suffix = "") {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${Math.round(number)}${suffix}` : "-";
+}
+
+function FlightList({ flights, selectedId, onSelect, onRefresh, onArchive, onDelete }) {
   return (
     <div className="flight-list">
       {flights.length === 0 && (
@@ -150,9 +155,26 @@ function FlightList({ flights, selectedId, onSelect, onRefresh, onArchive }) {
         </div>
       )}
       {flights.map((flight) => (
-        <article
+        <FlightCard
           key={flight.id}
-          className={`flight-card ${selectedId === flight.id ? "selected" : ""}`}
+          flight={flight}
+          selected={selectedId === flight.id}
+          onSelect={onSelect}
+          onRefresh={onRefresh}
+          onArchive={onArchive}
+          onDelete={onDelete}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FlightCard({ flight, selected, onSelect, onRefresh, onArchive, onDelete }) {
+  const raw = flight.latest_position_raw || {};
+
+  return (
+        <article
+          className={`flight-card ${selected ? "selected" : ""}`}
           onClick={() => onSelect(flight.id)}
         >
           <div className="flight-card-top">
@@ -168,8 +190,14 @@ function FlightList({ flights, selectedId, onSelect, onRefresh, onArchive }) {
             <span>{flight.destination_iata || "???"}</span>
           </div>
           <div className="metrics">
-            <span>{flight.last_altitude_ft ? `${Math.round(flight.last_altitude_ft)} ft` : "geen hoogte"}</span>
-            <span>{flight.last_ground_speed_kts ? `${Math.round(flight.last_ground_speed_kts)} kt` : "geen snelheid"}</span>
+            <span><Gauge size={14} /> {numberOrDash(flight.last_altitude_ft, " ft")}</span>
+            <span>{numberOrDash(flight.last_ground_speed_kts, " kt")}</span>
+            <span><Navigation size={14} /> {numberOrDash(flight.last_heading, " deg")}</span>
+          </div>
+          <div className="adsb-details">
+            <span>{raw.r || "geen registratie"}</span>
+            <span>{raw.t || "geen type"}</span>
+            <span>VS {numberOrDash(raw.baro_rate, " ft/min")}</span>
             <span>{flight.provider}</span>
           </div>
           <div className="card-actions">
@@ -179,10 +207,11 @@ function FlightList({ flights, selectedId, onSelect, onRefresh, onArchive }) {
             <button type="button" onClick={(event) => { event.stopPropagation(); onArchive(flight.id); }}>
               Archiveren
             </button>
+            <button className="danger-button" type="button" onClick={(event) => { event.stopPropagation(); onDelete(flight); }} title="Verwijderen">
+              <Trash2 size={16} />
+            </button>
           </div>
         </article>
-      ))}
-    </div>
   );
 }
 
@@ -214,7 +243,7 @@ function Dashboard({ auth, onLogout }) {
 
   useEffect(() => {
     loadFlights();
-    const timer = setInterval(loadFlights, 30000);
+    const timer = setInterval(loadFlights, 5000);
     return () => clearInterval(timer);
   }, []);
 
@@ -230,6 +259,16 @@ function Dashboard({ auth, onLogout }) {
 
   async function archiveFlight(id) {
     await api.archiveFlight(auth.token, id);
+    await loadFlights();
+  }
+
+  async function deleteFlight(flight) {
+    const confirmed = window.confirm(`Vlucht ${flight.flight_number} permanent verwijderen?`);
+    if (!confirmed) return;
+    await api.deleteFlight(auth.token, flight.id);
+    if (selectedId === flight.id) {
+      setSelectedId("");
+    }
     await loadFlights();
   }
 
@@ -273,6 +312,7 @@ function Dashboard({ auth, onLogout }) {
               onSelect={setSelectedId}
               onRefresh={refreshFlight}
               onArchive={archiveFlight}
+              onDelete={deleteFlight}
             />
           )}
         </aside>

@@ -48,5 +48,11 @@ export const api = {
       method: "PATCH",
       token
     });
+  },
+  deleteFlight(token, id) {
+    return request(`/flights/${id}`, {
+      method: "DELETE",
+      token
+    });
   }
 };
