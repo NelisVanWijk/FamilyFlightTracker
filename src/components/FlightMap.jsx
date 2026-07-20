@@ -49,6 +49,13 @@ function rawOf(flight) {
   return flight?.latest_position_raw || {};
 }
 
+function routeAirports(flight) {
+  const planned = flight.planned_route?._airports || [];
+  const origin = planned[0] || airportFallbacks[flight.origin_iata];
+  const destination = planned.at(-1) || airportFallbacks[flight.destination_iata];
+  return { origin, destination };
+}
+
 function distanceKm(from, to) {
   const earthRadiusKm = 6371;
   const toRadians = (value) => value * Math.PI / 180;
@@ -71,6 +78,14 @@ function createPlaneElement() {
       </svg>
     </span>
   `;
+  return element;
+}
+
+function createAirportElement(code, type) {
+  const element = document.createElement("button");
+  element.className = `airport-marker ${type}`;
+  element.type = "button";
+  element.innerHTML = `<span>${code || "???"}</span>`;
   return element;
 }
 
@@ -170,8 +185,7 @@ function plannedRouteFeature(flight) {
     .filter(([lon, lat]) => lon != null && lat != null);
 
   if (coordinates.length < 2) {
-    const origin = airportFallbacks[flight.origin_iata];
-    const destination = airportFallbacks[flight.destination_iata];
+    const { origin, destination } = routeAirports(flight);
     if (origin && destination) {
       coordinates = [[origin.lon, origin.lat], [destination.lon, destination.lat]];
     }
@@ -188,6 +202,32 @@ function plannedRouteFeature(flight) {
   };
 }
 
+function originConnectorFeature(flight) {
+  const { origin } = routeAirports(flight);
+  const originLat = toNumber(origin?.lat);
+  const originLon = toNumber(origin?.lon);
+  const firstPosition = (flight.positions || []).find((position) => toNumber(position.lat) != null && toNumber(position.lon) != null);
+  const firstLat = toNumber(firstPosition?.lat);
+  const firstLon = toNumber(firstPosition?.lon);
+
+  if (originLat == null || originLon == null || firstLat == null || firstLon == null) {
+    return null;
+  }
+
+  if (distanceKm([originLon, originLat], [firstLon, firstLat]) < 8) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    properties: { id: flight.id },
+    geometry: {
+      type: "LineString",
+      coordinates: [[originLon, originLat], [firstLon, firstLat]]
+    }
+  };
+}
+
 function remainingRouteFeature(flight) {
   const currentLat = toNumber(flight.last_lat);
   const currentLon = toNumber(flight.last_lon);
@@ -195,10 +235,7 @@ function remainingRouteFeature(flight) {
     return null;
   }
 
-  const plannedAirports = flight.planned_route?._airports || [];
-  const plannedDestination = plannedAirports.at(-1);
-  const fallbackDestination = airportFallbacks[flight.destination_iata];
-  const destination = plannedDestination || fallbackDestination;
+  const { destination } = routeAirports(flight);
   const destinationLat = toNumber(destination?.lat);
   const destinationLon = toNumber(destination?.lon);
 
@@ -220,6 +257,7 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
   const container = useRef(null);
   const map = useRef(null);
   const markers = useRef(new Map());
+  const airportMarkers = useRef(new Map());
   const liveFrame = useRef(null);
   const liveFlights = useRef([]);
   const centeredFlightId = useRef(null);
@@ -231,8 +269,9 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
     }
   }
 
-  function syncRouteSources(nextFlights) {
+function syncRouteSources(nextFlights) {
     setSourceData("planned-routes", nextFlights.map(plannedRouteFeature).filter(Boolean));
+    setSourceData("origin-connectors", nextFlights.map(originConnectorFeature).filter(Boolean));
     setSourceData("remaining-routes", nextFlights.map(remainingRouteFeature).filter(Boolean));
     setSourceData("flight-trails", nextFlights.map(trailFeature).filter(Boolean));
   }
@@ -259,6 +298,10 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] }
       });
+      map.current.addSource("origin-connectors", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
       map.current.addSource("remaining-routes", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] }
@@ -272,6 +315,17 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
           "line-width": 2,
           "line-opacity": 0.58,
           "line-dasharray": [2, 2]
+        }
+      });
+      map.current.addLayer({
+        id: "origin-connectors",
+        type: "line",
+        source: "origin-connectors",
+        paint: {
+          "line-color": "#23d0b2",
+          "line-width": 2,
+          "line-opacity": 0.52,
+          "line-dasharray": [1, 2]
         }
       });
       map.current.addLayer({
@@ -325,7 +379,29 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
     syncRouteSources(flights);
 
     const activeIds = new Set();
+    const activeAirportIds = new Set();
     flights.forEach((flight) => {
+      const { origin, destination } = routeAirports(flight);
+      [
+        { key: `${flight.id}:origin`, airport: origin, code: flight.origin_iata || origin?.iata, type: "origin" },
+        { key: `${flight.id}:destination`, airport: destination, code: flight.destination_iata || destination?.iata, type: "destination" }
+      ].forEach(({ key, airport, code, type }) => {
+        const airportLat = toNumber(airport?.lat);
+        const airportLon = toNumber(airport?.lon);
+        if (airportLat == null || airportLon == null) return;
+
+        activeAirportIds.add(key);
+        let airportMarker = airportMarkers.current.get(key);
+        if (!airportMarker) {
+          const element = createAirportElement(code, type);
+          element.addEventListener("click", () => onSelect(flight.id));
+          airportMarker = new maplibregl.Marker({ element, anchor: "center" }).setLngLat([airportLon, airportLat]).addTo(map.current);
+          airportMarkers.current.set(key, airportMarker);
+        } else {
+          airportMarker.setLngLat([airportLon, airportLat]);
+        }
+      });
+
       const lat = toNumber(flight.last_lat);
       const lon = toNumber(flight.last_lon);
       if (lat == null || lon == null) return;
@@ -351,6 +427,13 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
       if (!activeIds.has(id)) {
         marker.remove();
         markers.current.delete(id);
+      }
+    });
+
+    airportMarkers.current.forEach((marker, id) => {
+      if (!activeAirportIds.has(id)) {
+        marker.remove();
+        airportMarkers.current.delete(id);
       }
     });
 

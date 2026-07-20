@@ -427,6 +427,34 @@ textarea {
   stroke: #1c1604;
 }
 
+.airport-marker {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.airport-marker span {
+  display: block;
+  min-width: 44px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #071a1f;
+  background: #f4d45f;
+  border: 2px solid rgba(7, 26, 31, 0.75);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.airport-marker.origin span {
+  background: #23d0b2;
+}
+
+.airport-marker.destination span {
+  background: #ffce4a;
+}
+
 @media (max-width: 940px) {
   .topbar {
     height: auto;
