@@ -1,30 +1,64 @@
-import pg from "pg";
+import fs from "fs";
+import path from "path";
+import { DatabaseSync } from "node:sqlite";
 
-const { Pool } = pg;
+const sqlitePath = process.env.SQLITE_PATH || "/data/family-flight-tracker.sqlite";
+const sqliteDir = path.dirname(sqlitePath);
 
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://flights:flights@localhost:5432/flights"
-});
+if (sqliteDir && sqliteDir !== "." && sqliteDir !== ":memory:") {
+  fs.mkdirSync(sqliteDir, { recursive: true });
+}
+
+const db = new DatabaseSync(sqlitePath);
+db.exec("pragma foreign_keys = on");
+db.exec("pragma journal_mode = wal");
+
+function toSqlite(sql) {
+  return sql
+    .replace(/\$\d+/g, "?")
+    .replace(/now\(\)/gi, "datetime('now')")
+    .replace(/count\(\*\)::int/gi, "count(*)");
+}
+
+function bindValue(value) {
+  if (value === undefined) {
+    return null;
+  }
+  if (value && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+function normalizeRow(row) {
+  if (!row) {
+    return row;
+  }
+  for (const field of ["last_lat", "last_lon", "last_altitude_ft", "last_ground_speed_kts", "last_heading"]) {
+    if (row[field] !== null && row[field] !== undefined) {
+      row[field] = Number(row[field]);
+    }
+  }
+  return row;
+}
 
 export async function migrate() {
-  await pool.query(`
-    create extension if not exists "pgcrypto";
-
+  db.exec(`
     create table if not exists users (
-      id uuid primary key default gen_random_uuid(),
+      id text primary key default (lower(hex(randomblob(16)))),
       email text unique not null,
       name text not null,
       password_hash text not null,
       role text not null default 'member',
-      created_at timestamptz not null default now()
+      created_at text not null default (datetime('now'))
     );
 
     create table if not exists tracked_flights (
-      id uuid primary key default gen_random_uuid(),
-      user_id uuid not null references users(id) on delete cascade,
+      id text primary key default (lower(hex(randomblob(16)))),
+      user_id text not null references users(id) on delete cascade,
       passenger_name text not null,
       flight_number text not null,
-      flight_date date not null,
+      flight_date text not null,
       origin_iata text,
       destination_iata text,
       airline text,
@@ -33,53 +67,102 @@ export async function migrate() {
       provider text not null default 'demo',
       provider_ref text,
       notes text,
-      last_lat numeric,
-      last_lon numeric,
-      last_altitude_ft numeric,
-      last_ground_speed_kts numeric,
-      last_heading numeric,
-      scheduled_departure timestamptz,
-      scheduled_arrival timestamptz,
-      estimated_arrival timestamptz,
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now()
+      last_lat real,
+      last_lon real,
+      last_altitude_ft real,
+      last_ground_speed_kts real,
+      last_heading real,
+      scheduled_departure text,
+      scheduled_arrival text,
+      estimated_arrival text,
+      gate_origin text,
+      gate_destination text,
+      terminal_origin text,
+      terminal_destination text,
+      departure_delay_seconds integer,
+      arrival_delay_seconds integer,
+      actual_departure text,
+      actual_arrival text,
+      created_at text not null default (datetime('now')),
+      updated_at text not null default (datetime('now'))
     );
 
     create table if not exists flight_positions (
-      id bigserial primary key,
-      tracked_flight_id uuid not null references tracked_flights(id) on delete cascade,
-      captured_at timestamptz not null default now(),
-      lat numeric not null,
-      lon numeric not null,
-      altitude_ft numeric,
-      ground_speed_kts numeric,
-      heading numeric,
+      id integer primary key autoincrement,
+      tracked_flight_id text not null references tracked_flights(id) on delete cascade,
+      captured_at text not null default (datetime('now')),
+      lat real not null,
+      lon real not null,
+      altitude_ft real,
+      ground_speed_kts real,
+      heading real,
       source text not null,
-      raw jsonb
+      raw text
     );
 
     create table if not exists flight_events (
-      id bigserial primary key,
-      tracked_flight_id uuid not null references tracked_flights(id) on delete cascade,
-      created_at timestamptz not null default now(),
+      id integer primary key autoincrement,
+      tracked_flight_id text not null references tracked_flights(id) on delete cascade,
+      created_at text not null default (datetime('now')),
       event_type text not null,
       message text not null,
-      raw jsonb
+      raw text
     );
   `);
 
-  await pool.query(`
-    alter table tracked_flights add column if not exists gate_origin text;
-    alter table tracked_flights add column if not exists gate_destination text;
-    alter table tracked_flights add column if not exists terminal_origin text;
-    alter table tracked_flights add column if not exists terminal_destination text;
-    alter table tracked_flights add column if not exists departure_delay_seconds integer;
-    alter table tracked_flights add column if not exists arrival_delay_seconds integer;
-    alter table tracked_flights add column if not exists actual_departure timestamptz;
-    alter table tracked_flights add column if not exists actual_arrival timestamptz;
-  `);
+  for (const statement of [
+    "alter table tracked_flights add column gate_origin text",
+    "alter table tracked_flights add column gate_destination text",
+    "alter table tracked_flights add column terminal_origin text",
+    "alter table tracked_flights add column terminal_destination text",
+    "alter table tracked_flights add column departure_delay_seconds integer",
+    "alter table tracked_flights add column arrival_delay_seconds integer",
+    "alter table tracked_flights add column actual_departure text",
+    "alter table tracked_flights add column actual_arrival text"
+  ]) {
+    try {
+      db.exec(statement);
+    } catch (error) {
+      if (!String(error.message).includes("duplicate column name")) {
+        throw error;
+      }
+    }
+  }
 }
 
 export async function query(sql, params = []) {
-  return pool.query(sql, params);
+  const normalizedSql = toSqlite(sql);
+  const normalizedParams = params.map(bindValue);
+  const statement = db.prepare(normalizedSql);
+  const lower = normalizedSql.trim().toLowerCase();
+
+  if (lower.startsWith("select") || lower.includes(" returning ")) {
+    const rows = statement.all(...normalizedParams).map(normalizeRow);
+    return { rows };
+  }
+
+  const result = statement.run(...normalizedParams);
+  return { rows: [], rowCount: result.changes };
+}
+
+export async function getFlightsForUser(userId) {
+  const flights = db.prepare(`
+    select *
+    from tracked_flights
+    where user_id = ?
+    order by created_at desc
+  `).all(userId).map(normalizeRow);
+
+  const positionsStatement = db.prepare(`
+    select captured_at, lat, lon, altitude_ft, ground_speed_kts, heading, source
+    from flight_positions
+    where tracked_flight_id = ?
+    order by captured_at desc
+    limit 80
+  `);
+
+  return flights.map((flight) => ({
+    ...flight,
+    positions: positionsStatement.all(flight.id).reverse()
+  }));
 }

@@ -1,14 +1,14 @@
 # Family Flight Tracker
 
-Self-hosted Docker app om familievluchten te volgen, live posities op een kaart te tonen en je vluchtgeschiedenis in Postgres te bewaren.
+Self-hosted Docker app om familievluchten te volgen, live posities op een kaart te tonen en je vluchtgeschiedenis in SQLite te bewaren.
 
 ## Features
 
 - Login en registratie met JWT.
 - Vluchten koppelen aan een familielid.
 - Live kaart met MapLibre en OpenStreetMap tiles.
-- Automatisch opslaan van positiepunten en events.
-- Docker Compose met app en Postgres.
+- Automatisch opslaan van positiepunten en events in een lokale SQLite database.
+- Docker Compose met een app-container.
 - Providerlaag voor `demo`, `opensky`, `adsblol`, `flightaware` en `fr24`.
 
 ## Snel starten
@@ -44,11 +44,11 @@ Na elke push naar `main` bouwt GitHub Actions automatisch een image:
 ghcr.io/nelisvanwijk/family-flight-tracker:latest
 ```
 
-Handmatig draaien kan met een bestaande Postgres database:
+Handmatig draaien met SQLite:
 
 ```powershell
 docker run -p 8080:8080 `
-  -e DATABASE_URL="postgres://flights:flights@host.docker.internal:5432/flights" `
+  -v family-flight-tracker-data:/data `
   -e JWT_SECRET="maak-hier-een-lange-random-secret" `
   -e ADMIN_EMAIL="admin@example.com" `
   -e ADMIN_PASSWORD="maak-hier-een-admin-wachtwoord" `
@@ -72,11 +72,11 @@ Upload dit XML-bestand in Unraid via Docker templates of gebruik de raw URL nada
 https://raw.githubusercontent.com/NelisVanWijk/FamilyFlightTracker/main/unraid/family-flight-tracker.xml
 ```
 
-Let op: een Unraid template beschrijft normaal één container. Maak daarom apart een Postgres-container aan, bijvoorbeeld met hostnaam `family-flight-postgres`, database `flights`, gebruiker `flights` en wachtwoord `flights`, of pas `DATABASE_URL` aan naar jouw eigen database.
+De app gebruikt standaard SQLite. Je hoeft dus geen losse database-container aan te maken. Zorg alleen dat de template een vaste appdata-map naar `/data` mount, bijvoorbeeld `/mnt/user/appdata/family-flight-tracker`.
 
 Vul in de template minimaal deze velden in:
 
-- `DATABASE_URL`: connectiestring naar Postgres.
+- `App Data`: map op Unraid waar de SQLite database wordt opgeslagen.
 - `JWT_SECRET`: lange willekeurige waarde.
 - `ADMIN_EMAIL`: e-mailadres voor het eerste admin-account.
 - `ADMIN_PASSWORD`: wachtwoord voor het eerste admin-account.
@@ -106,7 +106,7 @@ docker compose up --build
 
 ## Ontwikkelen zonder Docker
 
-Je hebt lokaal Node.js en Postgres nodig.
+Je hebt lokaal Node.js nodig. SQLite zit ingebouwd in Node 24.
 
 ```powershell
 npm install
@@ -123,6 +123,12 @@ Belangrijkste tabellen:
 - `tracked_flights`: vluchtmetadata en laatste bekende status/positie.
 - `flight_positions`: alle opgeslagen positiepunten.
 - `flight_events`: provider events en missers.
+
+Standaard databasepad in Docker:
+
+```text
+/data/family-flight-tracker.sqlite
+```
 
 ## Productie-notities
 

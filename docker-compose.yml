@@ -1,26 +1,9 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: flights
-      POSTGRES_PASSWORD: flights
-      POSTGRES_DB: flights
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flights -d flights"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   app:
     build: .
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       APP_PORT: 8080
-      DATABASE_URL: postgres://flights:flights@postgres:5432/flights
+      SQLITE_PATH: /data/family-flight-tracker.sqlite
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-admin-password}
@@ -33,6 +16,5 @@ services:
       FR24_API_KEY: ${FR24_API_KEY:-}
     ports:
       - "8080:8080"
-
-volumes:
-  postgres-data:
+    volumes:
+      - ./data:/data

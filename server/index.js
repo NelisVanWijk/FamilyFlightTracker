@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import { createUser, ensureAdminUser, registrationAllowed, requireAuth, signUser, verifyLogin } from "./auth.js";
-import { migrate, query } from "./db.js";
+import { getFlightsForUser, migrate, query } from "./db.js";
 import { updateActiveFlights, updateTrackedFlight } from "./tracker.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,7 @@ app.post("/api/auth/register", async (req, res) => {
     const user = await createUser(req.body);
     res.status(201).json({ token: signUser(user), user });
   } catch (error) {
-    if (error.code === "23505") {
+    if (error.code === "23505" || error.code === "SQLITE_CONSTRAINT_UNIQUE") {
       return res.status(409).json({ error: "Er bestaat al een account met dit e-mailadres." });
     }
     res.status(400).json({ error: "Registratie mislukt.", details: error.errors || error.message });
@@ -59,33 +59,8 @@ app.get("/api/me", requireAuth, (req, res) => {
 });
 
 app.get("/api/flights", requireAuth, async (req, res) => {
-  const { rows } = await query(
-    `select tf.*,
-      coalesce(
-        json_agg(json_build_object(
-          'captured_at', fp.captured_at,
-          'lat', fp.lat,
-          'lon', fp.lon,
-          'altitude_ft', fp.altitude_ft,
-          'ground_speed_kts', fp.ground_speed_kts,
-          'heading', fp.heading,
-          'source', fp.source
-        ) order by fp.captured_at) filter (where fp.id is not null),
-        '[]'
-      ) as positions
-     from tracked_flights tf
-     left join lateral (
-       select * from flight_positions
-       where tracked_flight_id = tf.id
-       order by captured_at desc
-       limit 80
-     ) fp on true
-     where tf.user_id = $1
-     group by tf.id
-     order by tf.created_at desc`,
-    [req.user.id]
-  );
-  res.json({ flights: rows });
+  const flights = await getFlightsForUser(req.user.id);
+  res.json({ flights });
 });
 
 app.post("/api/flights", requireAuth, async (req, res) => {
