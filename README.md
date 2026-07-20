@@ -50,9 +50,14 @@ Handmatig draaien kan met een bestaande Postgres database:
 docker run -p 8080:8080 `
   -e DATABASE_URL="postgres://flights:flights@host.docker.internal:5432/flights" `
   -e JWT_SECRET="maak-hier-een-lange-random-secret" `
-  -e FLIGHT_PROVIDER="demo" `
+  -e ADMIN_EMAIL="admin@example.com" `
+  -e ADMIN_PASSWORD="maak-hier-een-admin-wachtwoord" `
+  -e FLIGHT_PROVIDER="flightaware" `
+  -e FLIGHTAWARE_API_KEY="jouw-flightaware-aeroapi-key" `
   ghcr.io/nelisvanwijk/family-flight-tracker:latest
 ```
+
+Bij de eerste start maakt de app automatisch een admin-account aan als `ADMIN_EMAIL` en `ADMIN_PASSWORD` zijn ingevuld. Daarna staat registratie standaard dicht. Zet `ALLOW_REGISTRATION=true` als familieleden zichzelf ook accounts mogen maken.
 
 ## Unraid template
 
@@ -70,12 +75,20 @@ https://raw.githubusercontent.com/NelisVanWijk/FamilyFlightTracker/main/unraid/f
 
 Let op: een Unraid template beschrijft normaal één container. Maak daarom apart een Postgres-container aan, bijvoorbeeld met hostnaam `family-flight-postgres`, database `flights`, gebruiker `flights` en wachtwoord `flights`, of pas `DATABASE_URL` aan naar jouw eigen database.
 
+Vul in de template minimaal deze velden in:
+
+- `DATABASE_URL`: connectiestring naar Postgres.
+- `JWT_SECRET`: lange willekeurige waarde.
+- `ADMIN_EMAIL`: e-mailadres voor het eerste admin-account.
+- `ADMIN_PASSWORD`: wachtwoord voor het eerste admin-account.
+- `FLIGHTAWARE_API_KEY`: je AeroAPI key.
+
 ## Live databron instellen
 
 In `.env` kun je de provider kiezen:
 
 ```env
-FLIGHT_PROVIDER=adsblol
+FLIGHT_PROVIDER=flightaware
 ```
 
 Beschikbare opties:
@@ -83,7 +96,7 @@ Beschikbare opties:
 - `demo`: gesimuleerde live posities, handig voor testen.
 - `opensky`: zoekt live states via OpenSky op callsign.
 - `adsblol`: zoekt live ADS-B data via callsign.
-- `flightaware`: placeholder voor AeroAPI integratie.
+- `flightaware`: gebruikt FlightAware AeroAPI voor vluchtstatus, tijden, gates, delays en trackposities. Als FlightAware geen positie teruggeeft, gebruikt de app ADSB.lol of demo als kaartpositie-fallback.
 - `fr24`: placeholder voor Flightradar24 API integratie.
 
 Daarna opnieuw starten:

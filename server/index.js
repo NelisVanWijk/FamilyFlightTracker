@@ -4,7 +4,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
-import { createUser, requireAuth, signUser, verifyLogin } from "./auth.js";
+import { createUser, ensureAdminUser, registrationAllowed, requireAuth, signUser, verifyLogin } from "./auth.js";
 import { migrate, query } from "./db.js";
 import { updateActiveFlights, updateTrackedFlight } from "./tracker.js";
 
@@ -33,6 +33,9 @@ app.get("/api/health", async (_req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   try {
+    if (!(await registrationAllowed())) {
+      return res.status(403).json({ error: "Registratie is gesloten. Log in met het admin-account uit de template." });
+    }
     const user = await createUser(req.body);
     res.status(201).json({ token: signUser(user), user });
   } catch (error) {
@@ -142,6 +145,7 @@ app.get(/^\/(?!api).*/, (_req, res) => {
 });
 
 await migrate();
+await ensureAdminUser();
 setInterval(() => updateActiveFlights().catch((error) => console.error("Tracker update mislukt", error)), 60_000);
 updateActiveFlights().catch(() => {});
 

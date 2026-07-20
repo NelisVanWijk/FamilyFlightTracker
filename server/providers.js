@@ -7,6 +7,39 @@ const airports = {
   CDG: { lat: 49.0097, lon: 2.5479, name: "Paris CDG" }
 };
 
+const airlineIataToIcao = {
+  KL: "KLM",
+  HV: "TRA",
+  OR: "TFL",
+  FR: "RYR",
+  U2: "EZY",
+  BA: "BAW",
+  LH: "DLH",
+  AF: "AFR",
+  IB: "IBE",
+  VY: "VLG",
+  TP: "TAP",
+  LX: "SWR",
+  OS: "AUA",
+  SK: "SAS",
+  DY: "NOZ",
+  EK: "UAE",
+  QR: "QTR",
+  TK: "THY",
+  DL: "DAL",
+  UA: "UAL",
+  AA: "AAL"
+};
+
+function normalizeFlightIdent(flightNumber) {
+  const compact = flightNumber.replace(/\s+/g, "").toUpperCase();
+  const match = compact.match(/^([A-Z0-9]{2})(\d.*)$/);
+  if (!match) {
+    return compact;
+  }
+  return `${airlineIataToIcao[match[1]] || match[1]}${match[2]}`;
+}
+
 function interpolate(from, to, progress) {
   return {
     lat: from.lat + (to.lat - from.lat) * progress,
@@ -44,6 +77,96 @@ async function fetchJson(url, options = {}) {
     throw new Error(`Provider gaf HTTP ${response.status}`);
   }
   return response.json();
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function flightDateRange(flight) {
+  const base = flight.flight_date ? new Date(`${flight.flight_date}T00:00:00Z`) : new Date();
+  return {
+    start: addDays(base, -1).toISOString(),
+    end: addDays(base, 2).toISOString()
+  };
+}
+
+function flightInstant(flight) {
+  const value = flight.actual_off || flight.estimated_off || flight.scheduled_off || flight.actual_out || flight.estimated_out || flight.scheduled_out;
+  return value ? new Date(value).getTime() : 0;
+}
+
+function chooseBestFlight(flights, trackedFlight) {
+  if (!flights?.length) {
+    return null;
+  }
+
+  const target = trackedFlight.flight_date ? new Date(`${trackedFlight.flight_date}T12:00:00Z`).getTime() : Date.now();
+  return [...flights].sort((a, b) => Math.abs(flightInstant(a) - target) - Math.abs(flightInstant(b) - target))[0];
+}
+
+function normalizeFlightAwareStatus(flight) {
+  const text = `${flight.status || ""}`.toLowerCase();
+  if (flight.cancelled) return "cancelled";
+  if (flight.actual_in || text.includes("arrived") || text.includes("landed")) return "landed";
+  if (flight.actual_off || text.includes("en route") || text.includes("airborne")) return "airborne";
+  if (flight.actual_out || text.includes("departed")) return "departed";
+  if (text.includes("scheduled") || text.includes("planned")) return "planned";
+  return text.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "tracked";
+}
+
+function normalizeFlightAwarePosition(position) {
+  if (!position || position.latitude == null || position.longitude == null) {
+    return null;
+  }
+
+  return {
+    lat: position.latitude,
+    lon: position.longitude,
+    altitude_ft: position.altitude == null ? null : position.altitude * 100,
+    ground_speed_kts: position.groundspeed ?? null,
+    heading: position.heading ?? null
+  };
+}
+
+function mergeFallbackPosition(live, fallback, provider) {
+  if (!fallback) {
+    return live;
+  }
+
+  return {
+    ...live,
+    provider,
+    lat: fallback.lat,
+    lon: fallback.lon,
+    altitude_ft: fallback.altitude_ft,
+    ground_speed_kts: fallback.ground_speed_kts,
+    heading: fallback.heading,
+    raw: { ...live.raw, fallbackPosition: fallback.raw || fallback }
+  };
+}
+
+async function flightAwareFetch(path, params = {}) {
+  const token = process.env.FLIGHTAWARE_API_KEY;
+  if (!token) {
+    throw new Error("FLIGHTAWARE_API_KEY ontbreekt");
+  }
+
+  const url = new URL(`https://aeroapi.flightaware.com/aeroapi${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return fetchJson(url, {
+    headers: {
+      Accept: "application/json",
+      "x-apikey": token
+    }
+  });
 }
 
 async function openskyLookup(flight) {
@@ -93,6 +216,90 @@ async function adsbLolLookup(flight) {
   };
 }
 
+async function flightAwareLookup(flight) {
+  const { start, end } = flightDateRange(flight);
+  const ident = normalizeFlightIdent(flight.flight_number);
+  const summary = await flightAwareFetch(`/flights/${encodeURIComponent(ident)}`, {
+    ident_type: "designator",
+    start,
+    end,
+    max_pages: 1
+  });
+
+  const flightInfo = chooseBestFlight(summary.flights || [], flight);
+  if (!flightInfo) {
+    return null;
+  }
+
+  let latestPosition = null;
+  try {
+    const track = await flightAwareFetch(`/flights/${encodeURIComponent(flightInfo.fa_flight_id)}/track`, {
+      include_estimated_positions: true
+    });
+    latestPosition = normalizeFlightAwarePosition(track.positions?.at(-1));
+  } catch (error) {
+    latestPosition = null;
+  }
+
+  if (!latestPosition) {
+    latestPosition = normalizeFlightAwarePosition(flightInfo.last_position);
+  }
+
+  let fallbackProvider = null;
+  let fallbackPosition = null;
+
+  if (!latestPosition) {
+    try {
+      const adsb = await adsbLolLookup(flight);
+      if (adsb) {
+        fallbackProvider = "flightaware_adsblol_position";
+        fallbackPosition = {
+          lat: adsb.lat,
+          lon: adsb.lon,
+          altitude_ft: adsb.altitude_ft,
+          ground_speed_kts: adsb.ground_speed_kts,
+          heading: adsb.heading,
+          raw: adsb.raw
+        };
+      }
+    } catch {
+      fallbackPosition = null;
+    }
+  }
+
+  const live = {
+    provider: latestPosition ? "flightaware" : "flightaware_no_position",
+    status: normalizeFlightAwareStatus(flightInfo),
+    lat: latestPosition?.lat ?? null,
+    lon: latestPosition?.lon ?? null,
+    altitude_ft: latestPosition?.altitude_ft ?? null,
+    ground_speed_kts: latestPosition?.ground_speed_kts ?? null,
+    heading: latestPosition?.heading ?? null,
+    scheduled_departure: flightInfo.scheduled_out || flightInfo.scheduled_off || null,
+    scheduled_arrival: flightInfo.scheduled_in || flightInfo.scheduled_on || null,
+    estimated_arrival: flightInfo.estimated_in || flightInfo.estimated_on || null,
+    actual_departure: flightInfo.actual_out || flightInfo.actual_off || null,
+    actual_arrival: flightInfo.actual_in || flightInfo.actual_on || null,
+    gate_origin: flightInfo.gate_origin || null,
+    gate_destination: flightInfo.gate_destination || null,
+    terminal_origin: flightInfo.terminal_origin || null,
+    terminal_destination: flightInfo.terminal_destination || null,
+    departure_delay_seconds: flightInfo.departure_delay ?? null,
+    arrival_delay_seconds: flightInfo.arrival_delay ?? null,
+    raw: { flight: flightInfo, position: latestPosition, source: "flightaware_aeroapi" }
+  };
+
+  if (!latestPosition && fallbackPosition) {
+    return mergeFallbackPosition(live, fallbackPosition, fallbackProvider);
+  }
+
+  if (!latestPosition) {
+    return mergeFallbackPosition(live, demoRoute(flight), "flightaware_demo_position");
+  }
+
+  return live;
+}
+
 export async function lookupFlight(flight) {
   const provider = (process.env.FLIGHT_PROVIDER || "demo").toLowerCase();
 
@@ -103,7 +310,10 @@ export async function lookupFlight(flight) {
     if (provider === "adsblol") {
       return await adsbLolLookup(flight);
     }
-    if (provider === "flightaware" || provider === "fr24") {
+    if (provider === "flightaware") {
+      return await flightAwareLookup(flight);
+    }
+    if (provider === "fr24") {
       return { ...demoRoute(flight), provider, status: "needs_provider_key" };
     }
     return demoRoute(flight);

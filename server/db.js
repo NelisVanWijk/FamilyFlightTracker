@@ -67,6 +67,17 @@ export async function migrate() {
       raw jsonb
     );
   `);
+
+  await pool.query(`
+    alter table tracked_flights add column if not exists gate_origin text;
+    alter table tracked_flights add column if not exists gate_destination text;
+    alter table tracked_flights add column if not exists terminal_origin text;
+    alter table tracked_flights add column if not exists terminal_destination text;
+    alter table tracked_flights add column if not exists departure_delay_seconds integer;
+    alter table tracked_flights add column if not exists arrival_delay_seconds integer;
+    alter table tracked_flights add column if not exists actual_departure timestamptz;
+    alter table tracked_flights add column if not exists actual_arrival timestamptz;
+  `);
 }
 
 export async function query(sql, params = []) {

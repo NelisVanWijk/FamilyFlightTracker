@@ -23,6 +23,17 @@ export async function updateTrackedFlight(flight) {
          last_ground_speed_kts = $7,
          last_heading = $8,
          estimated_arrival = coalesce($9, estimated_arrival),
+         scheduled_departure = coalesce($10, scheduled_departure),
+         scheduled_arrival = coalesce($11, scheduled_arrival),
+         actual_departure = coalesce($12, actual_departure),
+         actual_arrival = coalesce($13, actual_arrival),
+         gate_origin = coalesce($14, gate_origin),
+         gate_destination = coalesce($15, gate_destination),
+         terminal_origin = coalesce($16, terminal_origin),
+         terminal_destination = coalesce($17, terminal_destination),
+         departure_delay_seconds = coalesce($18, departure_delay_seconds),
+         arrival_delay_seconds = coalesce($19, arrival_delay_seconds),
+         provider_ref = coalesce($20, provider_ref),
          updated_at = now()
      where id = $1`,
     [
@@ -34,7 +45,18 @@ export async function updateTrackedFlight(flight) {
       live.altitude_ft,
       live.ground_speed_kts,
       live.heading,
-      live.estimated_arrival || null
+      live.estimated_arrival || null,
+      live.scheduled_departure || null,
+      live.scheduled_arrival || null,
+      live.actual_departure || null,
+      live.actual_arrival || null,
+      live.gate_origin || null,
+      live.gate_destination || null,
+      live.terminal_origin || null,
+      live.terminal_destination || null,
+      live.departure_delay_seconds ?? null,
+      live.arrival_delay_seconds ?? null,
+      live.raw?.flight?.fa_flight_id || null
     ]
   );
 

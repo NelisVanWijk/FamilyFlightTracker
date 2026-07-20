@@ -57,6 +57,43 @@ export async function createUser(input) {
   return rows[0];
 }
 
+export async function ensureAdminUser() {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const name = process.env.ADMIN_NAME?.trim() || "Admin";
+  const password = process.env.ADMIN_PASSWORD || "";
+
+  if (!email || !password) {
+    return null;
+  }
+
+  if (password.length < 8) {
+    throw new Error("ADMIN_PASSWORD moet minimaal 8 tekens zijn.");
+  }
+
+  const existing = await query("select id, email, name, role from users where email = $1", [email]);
+  if (existing.rows[0]) {
+    return existing.rows[0];
+  }
+
+  const hash = await bcrypt.hash(password, 12);
+  const { rows } = await query(
+    `insert into users (email, name, password_hash, role)
+     values ($1, $2, $3, 'admin')
+     returning id, email, name, role`,
+    [email, name, hash]
+  );
+  return rows[0];
+}
+
+export async function registrationAllowed() {
+  if ((process.env.ALLOW_REGISTRATION || "").toLowerCase() === "true") {
+    return true;
+  }
+
+  const { rows } = await query("select count(*)::int as count from users");
+  return rows[0].count === 0;
+}
+
 export async function verifyLogin(input) {
   const parsed = loginSchema.parse(input);
   const { rows } = await query("select * from users where email = $1", [parsed.email]);
