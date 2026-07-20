@@ -102,6 +102,7 @@ export async function migrate() {
       arrival_delay_seconds integer,
       actual_departure text,
       actual_arrival text,
+      planned_route_raw text,
       created_at text not null default (datetime('now')),
       updated_at text not null default (datetime('now'))
     );
@@ -137,7 +138,8 @@ export async function migrate() {
     "alter table tracked_flights add column departure_delay_seconds integer",
     "alter table tracked_flights add column arrival_delay_seconds integer",
     "alter table tracked_flights add column actual_departure text",
-    "alter table tracked_flights add column actual_arrival text"
+    "alter table tracked_flights add column actual_arrival text",
+    "alter table tracked_flights add column planned_route_raw text"
   ]) {
     try {
       db.exec(statement);
@@ -191,6 +193,7 @@ export async function getFlightsForUser(userId) {
     return {
       ...flight,
       positions,
+      planned_route: parseJson(flight.planned_route_raw),
       latest_position_raw: latestPosition?.raw || null,
       last_seen_at: latestPosition?.captured_at || flight.updated_at
     };

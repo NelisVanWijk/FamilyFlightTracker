@@ -133,12 +133,29 @@ function trailFeature(flight) {
   };
 }
 
+function plannedRouteFeature(flight) {
+  const coordinates = (flight.planned_route?._airports || [])
+    .map((airport) => [toNumber(airport.lon), toNumber(airport.lat)])
+    .filter(([lon, lat]) => lon != null && lat != null);
+
+  if (coordinates.length < 2) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    properties: { id: flight.id },
+    geometry: { type: "LineString", coordinates }
+  };
+}
+
 export function FlightMap({ flights, selectedFlight, onSelect }) {
   const container = useRef(null);
   const map = useRef(null);
   const markers = useRef(new Map());
   const liveFrame = useRef(null);
   const liveFlights = useRef([]);
+  const centeredFlightId = useRef(null);
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -157,6 +174,21 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
       map.current.addSource("flight-trails", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] }
+      });
+      map.current.addSource("planned-routes", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+      map.current.addLayer({
+        id: "planned-routes",
+        type: "line",
+        source: "planned-routes",
+        paint: {
+          "line-color": "#f4d45f",
+          "line-width": 2,
+          "line-opacity": 0.58,
+          "line-dasharray": [2, 2]
+        }
       });
       map.current.addLayer({
         id: "flight-trails-glow",
@@ -193,6 +225,14 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
       });
     }
 
+    const plannedSource = map.current.getSource("planned-routes");
+    if (plannedSource) {
+      plannedSource.setData({
+        type: "FeatureCollection",
+        features: flights.map(plannedRouteFeature).filter(Boolean)
+      });
+    }
+
     const activeIds = new Set();
     flights.forEach((flight) => {
       const lat = toNumber(flight.last_lat);
@@ -225,7 +265,8 @@ export function FlightMap({ flights, selectedFlight, onSelect }) {
 
     const selectedLat = toNumber(selectedFlight?.last_lat);
     const selectedLon = toNumber(selectedFlight?.last_lon);
-    if (selectedLat != null && selectedLon != null) {
+    if (selectedLat != null && selectedLon != null && centeredFlightId.current !== selectedFlight.id) {
+      centeredFlightId.current = selectedFlight.id;
       map.current.easeTo({
         center: [selectedLon, selectedLat],
         zoom: Math.max(map.current.getZoom(), 6.3),

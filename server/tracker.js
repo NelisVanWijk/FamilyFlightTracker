@@ -34,6 +34,7 @@ export async function updateTrackedFlight(flight) {
          departure_delay_seconds = coalesce($18, departure_delay_seconds),
          arrival_delay_seconds = coalesce($19, arrival_delay_seconds),
          provider_ref = coalesce($20, provider_ref),
+         planned_route_raw = coalesce($21, planned_route_raw),
          updated_at = now()
      where id = $1`,
     [
@@ -56,7 +57,8 @@ export async function updateTrackedFlight(flight) {
       live.terminal_destination || null,
       live.departure_delay_seconds ?? null,
       live.arrival_delay_seconds ?? null,
-      live.raw?.flight?.fa_flight_id || null
+      live.raw?.flight?.fa_flight_id || null,
+      live.planned_route || null
     ]
   );
 

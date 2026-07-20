@@ -208,6 +208,15 @@ async function adsbLolLookup(flight) {
     return null;
   }
 
+  let plannedRoute = null;
+  if (!flight.planned_route_raw) {
+    try {
+      plannedRoute = await fetchJson(`https://api.adsb.lol/api/0/route/${encodeURIComponent(callsign)}/${aircraft.lat}/${aircraft.lon}`);
+    } catch {
+      plannedRoute = null;
+    }
+  }
+
   return {
     provider: "adsblol",
     status: "airborne",
@@ -216,6 +225,7 @@ async function adsbLolLookup(flight) {
     altitude_ft: aircraft.alt_baro === "ground" ? 0 : aircraft.alt_baro,
     ground_speed_kts: aircraft.gs,
     heading: aircraft.track,
+    planned_route: plannedRoute,
     raw: aircraft
   };
 }
