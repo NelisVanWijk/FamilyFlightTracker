@@ -52,8 +52,7 @@ docker run -p 8080:8080 `
   -e JWT_SECRET="maak-hier-een-lange-random-secret" `
   -e ADMIN_EMAIL="admin@example.com" `
   -e ADMIN_PASSWORD="maak-hier-een-admin-wachtwoord" `
-  -e FLIGHT_PROVIDER="flightaware" `
-  -e FLIGHTAWARE_API_KEY="jouw-flightaware-aeroapi-key" `
+  -e FLIGHT_PROVIDER="adsblol" `
   ghcr.io/nelisvanwijk/family-flight-tracker:latest
 ```
 
@@ -81,22 +80,22 @@ Vul in de template minimaal deze velden in:
 - `JWT_SECRET`: lange willekeurige waarde.
 - `ADMIN_EMAIL`: e-mailadres voor het eerste admin-account.
 - `ADMIN_PASSWORD`: wachtwoord voor het eerste admin-account.
-- `FLIGHTAWARE_API_KEY`: je AeroAPI key.
+- `FLIGHT_PROVIDER`: laat op `adsblol` staan voor gratis ADS-B posities.
 
 ## Live databron instellen
 
 In `.env` kun je de provider kiezen:
 
 ```env
-FLIGHT_PROVIDER=flightaware
+FLIGHT_PROVIDER=adsblol
 ```
 
 Beschikbare opties:
 
 - `demo`: gesimuleerde live posities, handig voor testen.
 - `opensky`: zoekt live states via OpenSky op callsign.
-- `adsblol`: zoekt live ADS-B data via callsign.
-- `flightaware`: gebruikt FlightAware AeroAPI voor vluchtstatus, tijden, gates, delays en trackposities. Als FlightAware geen positie teruggeeft, gebruikt de app ADSB.lol of demo als kaartpositie-fallback.
+- `adsblol`: zoekt gratis live ADS-B data via callsign. Aanbevolen standaard voor deze prive-app.
+- `flightaware`: optioneel; gebruikt FlightAware AeroAPI voor vluchtstatus, tijden, gates, delays en trackposities. Let op: AeroAPI kan per query kosten.
 - `fr24`: placeholder voor Flightradar24 API integratie.
 
 Daarna opnieuw starten:
